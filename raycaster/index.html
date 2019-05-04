@@ -5,16 +5,19 @@
     <title>Raycaster Demo - PlayfulJS</title>
   </head>
   <body style='background: #000; margin: 0; padding: 0; width: 100%; height: 100%;'>
+    <div id='message'>
     <canvas id='display' width='1' height='1' style='width: 100%; height: 100%;' />
 
     <script>
-
+      'use strict'
       var CIRCLE = Math.PI * 2;
       var MOBILE = /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent)
 
       function Controls() {
-        this.codes  = { 37: 'left', 39: 'right', 38: 'forward', 40: 'backward' };
-        this.states = { 'left': false, 'right': false, 'forward': false, 'backward': false };
+        this.codes = { 32: 'jump' }
+        //this.codes  = { 37: 'left', 39: 'right', 38: 'forward', 40: 'backward' };
+        //this.states = { 'left': false, 'right': false, 'forward': false, 'backward': false };
+        this.states = { 'jump': false }
         document.addEventListener('keydown', this.onKey.bind(this, true), false);
         document.addEventListener('keyup', this.onKey.bind(this, false), false);
         document.addEventListener('touchstart', this.onTouch.bind(this), false);
@@ -51,12 +54,15 @@
         this.height = height;
       }
       
-      function Player(x, y, direction) {
+      function Player(x, y, direction, onGameOver) {
         this.x = x;
         this.y = y;
         this.direction = direction;
-        this.weapon = new Bitmap('assets/knife_hand.png', 319, 320);
+        this.weapon = new Bitmap('assets/knife_hand.png', 0, 0);
         this.paces = 0;
+        this.velocityX = 0;
+        this.velocityY = 0;
+        this.onGameOver = onGameOver;
       }
 
       Player.prototype.rotate = function(angle) {
@@ -66,24 +72,75 @@
       Player.prototype.walk = function(distance, map) {
         var dx = Math.cos(this.direction) * distance;
         var dy = Math.sin(this.direction) * distance;
-        if (map.get(this.x + dx, this.y) <= 0) this.x += dx;
-        if (map.get(this.x, this.y + dy) <= 0) this.y += dy;
-        this.paces += distance;
+        if (map.get(this.x + dx, this.y) <= 0) {
+           this.x += dx;
+           //this.paces += distance;
+        } 
+        if (map.get(this.x, this.y + dy) <= 0) { 
+          this.y += dy;
+          this.paces += distance;
+        } else {
+          this.onGameOver();
+        }
+        
       };
 
+      Player.prototype.jump = function(force, map) {
+        const perpendicular = this.direction - Math.PI/2;
+        var dx = Math.cos(perpendicular) * force + this.velocityX;
+        var dy = Math.sin(perpendicular) * force + this.velocityY;
+        this.velocityX = dx;
+        this.velocityY = dy;
+      };
+
+      Player.prototype.move = function(map) {
+        if (map.get(this.x + this.velocityX, this.y) <= 0) {
+          this.x += this.velocityX; 
+        } else {
+          this.velocityX = 0;
+          //alert('game over');
+          this.onGameOver();
+        }
+        if (map.get(this.x, this.y + this.velocityY) <= 0) {
+          this.y += this.velocityY;
+        } else {
+          this.velocityY = 0;
+          //alert('game over');
+          this.onGameOver();
+        }
+      }
+
+      Player.prototype.fall = function(seconds, map) {
+        if(this.velocityX < 0.5) {
+          let dx = Math.cos(map.gravity) * seconds * 0.15 + this.velocityX;
+          this.velocityX = dx;
+        }
+        if(this.velocityY < 0.5) {
+          let dy = Math.sin(map.gravity) * seconds * 0.15 + this.velocityY;
+          this.velocityY = dy;
+        }
+      }
+
       Player.prototype.update = function(controls, map, seconds) {
-        if (controls.left) this.rotate(-Math.PI * seconds);
-        if (controls.right) this.rotate(Math.PI * seconds);
-        if (controls.forward) this.walk(3 * seconds, map);
-        if (controls.backward) this.walk(-3 * seconds, map);
+        //if (controls.left) this.rotate(-Math.PI * seconds);
+        //if (controls.right) this.rotate(Math.PI * seconds);
+        /*if (controls.forward)*/ 
+        this.walk(1.5 * seconds, map);
+        this.fall(seconds, map);
+        if(controls.jump) {
+          this.jump(0.8 * seconds, map);
+        }
+        this.move(map);
+        //if (controls.backward) this.walk(-3 * seconds, map);
       };
 
       function Map(size) {
         this.size = size;
         this.wallGrid = new Uint8Array(size * size);
-        this.skybox = new Bitmap('assets/deathvalley_panorama.jpg', 2000, 750);
-        this.wallTexture = new Bitmap('assets/wall_texture.jpg', 1024, 1024);
+        this.skybox = new Bitmap('assets/panorama.jpg', 1200, 561);
+        this.wallTexture = new Bitmap('assets/wall_texture_low.jpg', 100, 100);
         this.light = 0;
+        this.gravity = Math.PI;
       }
 
       Map.prototype.get = function(x, y) {
@@ -105,7 +162,7 @@
         var cos = Math.cos(angle);
         var noWall = { length2: Infinity };
 
-        return ray({ x: point.x, y: point.y, height: 0, distance: 0 });
+        return ray({ x: point.x, y: point.y, width: 0, distance: 0 });
 
         function ray(origin) {
           var stepX = step(sin, cos, origin.x, origin.y);
@@ -132,7 +189,7 @@
         function inspect(step, shiftX, shiftY, distance, offset) {
           var dx = cos < 0 ? shiftX : 0;
           var dy = sin < 0 ? shiftY : 0;
-          step.height = self.get(step.x - dx, step.y - dy);
+          step.width = self.get(step.x - dx, step.y - dy);
           step.distance = distance + Math.sqrt(step.length2);
           if (shiftX) step.shading = cos < 0 ? 2 : 0;
           else step.shading = sin < 0 ? 2 : 1;
@@ -148,23 +205,27 @@
 
       function Camera(canvas, resolution, focalLength) {
         this.ctx = canvas.getContext('2d');
-        this.width = canvas.width = window.innerWidth * 0.5;
-        this.height = canvas.height = window.innerHeight * 0.5;
+        
+        this.width = canvas.width = window.innerWidth //* 0.5;
+        this.height = canvas.height = window.innerHeight //* 0.5;
         this.resolution = resolution;
-        this.spacing = this.width / resolution;
+        this.spacing = this.height / resolution;
         this.focalLength = focalLength || 0.8;
         this.range = MOBILE ? 8 : 14;
         this.lightRange = 5;
         this.scale = (this.width + this.height) / 1200;
+        this.message = '';
       }
 
       Camera.prototype.render = function(player, map) {
         this.drawSky(player.direction, map.skybox, map.light);
-        this.drawColumns(player, map);
+        this.drawRows(player, map);
         this.drawWeapon(player.weapon, player.paces);
+        this.drawMessage(this.message);
+        this.drawScore(player.paces);
       };
 
-      Camera.prototype.drawSky = function(direction, sky, ambient) {
+      Camera.prototype.drawSky = function(direction, sky, ambient ) {
         var width = sky.width * (this.height / sky.height) * 2;
         var left = (direction / CIRCLE) * -width;
 
@@ -181,13 +242,13 @@
         this.ctx.restore();
       };
 
-      Camera.prototype.drawColumns = function(player, map) {
+      Camera.prototype.drawRows = function(player, map) {
         this.ctx.save();
-        for (var column = 0; column < this.resolution; column++) {
-          var x = column / this.resolution - 0.5;
-          var angle = Math.atan2(x, this.focalLength);
+        for (var row = 0; row < this.resolution; row++) {
+          var y = row / this.resolution - 0.5;
+          var angle = Math.atan2(y, this.focalLength);
           var ray = map.cast(player, player.direction + angle, this.range);
-          this.drawColumn(column, ray, angle, map);
+          this.drawRow(row, ray, angle, map);
         }
         this.ctx.restore();
       };
@@ -200,14 +261,14 @@
         this.ctx.drawImage(weapon.image, left, top, weapon.width * this.scale, weapon.height * this.scale);
       };
 
-      Camera.prototype.drawColumn = function(column, ray, angle, map) {
+      Camera.prototype.drawRow = function(row, ray, angle, map) {
         var ctx = this.ctx;
         var texture = map.wallTexture;
-        var left = Math.floor(column * this.spacing);
+        var left = Math.floor(row * this.spacing);
         var width = Math.ceil(this.spacing);
         var hit = -1;
 
-        while (++hit < ray.length && ray[hit].height <= 0);
+        while (++hit < ray.length && ray[hit].width <= 0);
 
         for (var s = ray.length - 1; s >= 0; s--) {
           var step = ray[s];
@@ -215,32 +276,56 @@
           var rain = (rainDrops > 0) && this.project(0.1, angle, step.distance);
 
           if (s === hit) {
-            var textureX = Math.floor(texture.width * step.offset);
-            var wall = this.project(step.height, angle, step.distance);
+            var textureY = Math.floor(texture.height * step.offset);
+            var wall = this.project(step.width, angle, step.distance);
 
             ctx.globalAlpha = 1;
-            ctx.drawImage(texture.image, textureX, 0, 1, texture.height, left, wall.top, width, wall.height);
+
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(texture.image, 0, textureY, texture.width, 1,  wall.left, left, wall.width, width );
             
             ctx.fillStyle = '#000000';
             ctx.globalAlpha = Math.max((step.distance + step.shading) / this.lightRange - map.light, 0);
-            ctx.fillRect(left, wall.top, width, wall.height);
+            //ctx.fillRect(left, wall.top, width, wall.height);
           }
           
           ctx.fillStyle = '#ffffff';
           ctx.globalAlpha = 0.15;
-          while (--rainDrops > 0) ctx.fillRect(left, Math.random() * rain.top, 1, rain.height);
+          //while (--rainDrops > 0) ctx.fillRect(left, Math.random() * rain.top, 1, rain.height);
         }
       };
 
-      Camera.prototype.project = function(height, angle, distance) {
+      Camera.prototype.project = function(width, angle, distance) {
         var z = distance * Math.cos(angle);
-        var wallHeight = this.height * height / z;
-        var bottom = this.height / 2 * (1 + 1 / z);
+        var wallWidth = this.width * width / z;
+        var right = this.width / 2 * (1 + 1 / z);
         return {
-          top: bottom - wallHeight,
-          height: wallHeight
+          left: right - wallWidth,
+          width: wallWidth
         }; 
       };
+
+      Camera.prototype.drawMessage = function(message) {
+        if(!message) return;
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(this.width/2 - 150,  this.height/2 - 90, 300,  150);
+        this.ctx.font = "50px Arial";
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.fillText(message, this.width/2-130, this.height/2);
+      }
+
+      Camera.prototype.drawScore = function(score) {
+        if(!score) return;
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, 0, this.width/10,  this.height/20);
+        this.ctx.font = "15px Arial";
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.fillText("Score : "+ Math.floor(score*1).toString().padStart(8, '0'), 0, this.height/30, this.width/10);
+      }
+
+      Camera.prototype.onGameOver = function() {
+        this.message = 'Game Over';
+      }
 
       function GameLoop() {
         this.frame = this.frame.bind(this);
@@ -261,10 +346,10 @@
       };
 
       var display = document.getElementById('display');
-      var player = new Player(15.3, -1.2, Math.PI * 0.3);
       var map = new Map(32);
       var controls = new Controls();
       var camera = new Camera(display, MOBILE ? 160 : 320, 0.8);
+      var player = new Player(15.3, -1.2, Math.PI/2, camera.onGameOver.bind(camera));
       var loop = new GameLoop();
 
       map.randomize();
@@ -276,14 +361,6 @@
       });
 
     </script>
-    <script>
-      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-      })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
 
-      ga('create', 'UA-50885475-1', 'playfuljs.com');
-      ga('send', 'pageview');
-    </script>
   </body>
 </html>
